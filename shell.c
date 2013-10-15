@@ -39,15 +39,33 @@ var_t* parseVar(char *buffer) {
   }
   var_t *var = malloc(sizeof(var_t));
   int length = (var_delim - buffer);
-  var->name = malloc(sizeof(char) * length + 1);
+  var->name = malloc(sizeof(char) * (length + 1));
   strncpy(var->name, buffer, length);
   var->name[length] = '\0';
   stripWhitespaces(var->name);
   length = strlen(var_delim + 1);
-  var->value = malloc(sizeof(char) * length + 1);
+  var->value = malloc(sizeof(char) * (length + 1));
   strncpy(var->value, var_delim + 1, length + 1);
   stripWhitespaces(var->value);
   return var;
+}
+
+/*
+ * parse special commands
+ * @param {command_t*} cmd pre-parsed command with argv and envp set
+ * @pram {environment_t} env environment variables list
+ */
+void parseSpecial(command_t *cmd, environment_t env) {
+  if (strcmp(cmd->argv[0], CMD_CD) == 0) {
+    //parse special meaning for ~
+    if (strcmp(cmd->argv[1], "~") == 0) {
+      var_t *home = getEnvVar(env, "HOME");
+      free(cmd->argv[1]);
+      cmd->argv[1] = malloc(sizeof(char) * 
+			    (strlen(home->value) + 1));
+      strcpy(cmd->argv[1], home->value);
+    }
+  }
 }
 
 /*
@@ -68,7 +86,7 @@ command_t* parseCommand(char *buffer, environment_t env) {
   if (var != NULL) {
     cmd->argc = 3;
     cmd->argv = malloc(cmd->argc * sizeof(char*));
-    cmd->argv[0] = malloc(sizeof(char) * strlen(CMD_ASSIGN));
+    cmd->argv[0] = malloc(sizeof(char) * (strlen(CMD_ASSIGN) + 1));
     strcpy(cmd->argv[0], CMD_ASSIGN);
     cmd->argv[1] = var->name;
     cmd->argv[2] = var->value;
@@ -106,7 +124,7 @@ command_t* parseCommand(char *buffer, environment_t env) {
       current->next->next = NULL;
       current = current->next;
     }
-    current->value = malloc(sizeof(char) * strlen(tok));
+    current->value = malloc(sizeof(char) * (strlen(tok) + 1));
     strcpy(current->value, tok);
     //increment argc
     argc++;
@@ -148,7 +166,7 @@ command_t* parseCommand(char *buffer, environment_t env) {
   }
   cmd->envp[index] = NULL;
   //parsing specific to special commands
-  //parseSpecial(cmd, env);
+  parseSpecial(cmd, env);
   return cmd;
 }
 
@@ -216,7 +234,7 @@ void parseProfile(environment_t env) {
  * @returns {char*} full path string <malloc>
  */
 char* getFullPath(const char *file, var_t *path) {
-  char *tmp_path = malloc(sizeof(char) * strlen(path->value));
+  char *tmp_path = malloc(sizeof(char) * (strlen(path->value) + 1));
   strcpy(tmp_path, path->value);
   char *full_path = NULL;
   char *tok = strtok(tmp_path, ":");
@@ -227,7 +245,8 @@ char* getFullPath(const char *file, var_t *path) {
     while (dir_entity != NULL) {
       if (strcmp(dir_entity->d_name, file) == 0) {
 	//found file in this directory
-	full_path = malloc(sizeof(char) * (strlen(file) + strlen(tok)+ 2));
+	full_path = malloc(sizeof(char) * 
+			   (strlen(file) + strlen(tok) + 2));
 	full_path[0] = '\0';
 	strcat(full_path, tok);
 	strcat(full_path, "/");
@@ -264,6 +283,9 @@ void execCommand(command_t *cmd, environment_t env) {
   }
   //normal command execution
   char *full_path = getFullPath(cmd->argv[0], getEnvVar(env,"PATH"));
+  if (full_path == NULL) {
+    consoleError("Unexisting command");
+  }
   pid_t pid = fork();
   if (pid < 0) {
     //error
@@ -305,7 +327,7 @@ bool checkShellEnv(environment_t env) {
   if (home == NULL || path == NULL) return false;
   if (opendir(home->value) == NULL)
     return false;
-  char *tmp_path = malloc(sizeof(char) * strlen(path->value));
+  char *tmp_path = malloc(sizeof(char) * (strlen(path->value) + 1));
   strcpy(tmp_path, path->value);
   char *tok = strtok(tmp_path, ":");
   while (tok != NULL) {
