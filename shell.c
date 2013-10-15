@@ -1,5 +1,4 @@
 #include "shell.h"
-#include "util.h"
 
 const char PROFILE_FILE_NAME[] = "profile";
 const int MAX_COMMAND_LENGTH = 512;
@@ -78,23 +77,27 @@ command_t* parseCommand(char *buffer) {
  * @param {profile_t**} profileList list of environment variables
  * @returns {command_t*} parsed command or NULL
  */
-command_t *prompt(var_t home, profile_t **profileList) {
+command_t *prompt(var_t home) {
   char buffer[MAX_COMMAND_LENGTH + 1];
   var_t *var;
-  command_t *cmd;
+  command_t *cmd = NULL;
   printf("%s>", home.value);
   fgets(buffer, MAX_COMMAND_LENGTH, stdin);
   if (var = parseVar(buffer)) {
     //if user entered variable assignment
-    updateVar(*var, profileList);
+    //build assignment command
     free(var);
   }
-  else if((cmd = parseCommand(buffer)) != NULL){
-    return NULL;
-  }
   else {
-    //error
+    cmd = parseCommand(buffer);
+    //if user entered a command
+    //build command_t for that command
+    if (cmd == NULL) {
+      //error
+      consoleError("Invalid command");
+    }
   }
+  return cmd;
 }
 
 void parseProfile(profile_t **profileList) {

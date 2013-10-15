@@ -1,5 +1,4 @@
 #include "shell.h"
-#include "error.h"
 
 
 int main (int argc, char *argv[], char *envp[]) {
@@ -20,7 +19,7 @@ int main (int argc, char *argv[], char *envp[]) {
   //main command listening loop
   command_t *cmd;
   while (true) {
-    cmd = prompt(home->var, &profileList);
+    cmd = prompt(home->var);
     break;
     }
   exit(0);

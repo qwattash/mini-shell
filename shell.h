@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include "util.h"
+#include "error.h"
 
 #ifndef SHELL_H
 #define SHELL_H
@@ -33,7 +35,7 @@ typedef struct {
  * @param {var_t} home home variable
  * @param {profile_t**} profileList environment variables list
  */
-command_t* prompt(var_t home, profile_t **profileList);
+command_t* prompt(var_t home);
 
 /*
  * parse profile file and fill given structure accordingly
