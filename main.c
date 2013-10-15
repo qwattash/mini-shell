@@ -14,12 +14,9 @@ int main (int argc, char *argv[], char *envp[]) {
   while (true) {
     prompt(env, buffer);
     cmd = parseCommand(buffer, env);
-    int i = 0;
-    for (; i < cmd->argc; i++) {
-      printf("arg %d: %s\n", i, cmd->argv[i]);
-    }
     execCommand(cmd, env);
-    free(cmd);
+    deleteCommand(cmd);
   }
+  deleteEnv(env);
   exit(0);
 }

@@ -4,6 +4,8 @@
 const char PROFILE_FILE_NAME[] = "profile";
 //variable assignment special command
 const char CMD_ASSIGN[] = "=";
+const char CMD_CD[] = "cd";
+const char CMD_EXIT[] = "exit";
 //buffer for command parsing
 const int MAX_COMMAND_LENGTH = 512;
 
@@ -60,9 +62,7 @@ command_t* parseCommand(char *buffer, environment_t env) {
   //init command to avoid random behavior in case of error
   cmd->argc = 0;
   cmd->argv = NULL;
-  cmd->exitVal = 0;
-  cmd->output = NULL;
-  cmd->error = NULL;
+  cmd->exitStatus = 0;
   //check if command inserted is a variable assignment
   var_t *var = parseVar(buffer);
   if (var != NULL) {
@@ -113,9 +113,10 @@ command_t* parseCommand(char *buffer, environment_t env) {
     //go on with parsing the string
     tok = strtok(NULL, " ");
   }
-  //move the list to argv array
+  //build argv array
   cmd->argc = argc;
-  cmd->argv = malloc(sizeof(char*) * cmd->argc);
+  //last argv location is set to NULL
+  cmd->argv = malloc(sizeof(char*) * (cmd->argc + 1));
   argv_t *current = list;
   int index = 0;
   while (current != NULL) {
@@ -125,8 +126,29 @@ command_t* parseCommand(char *buffer, environment_t env) {
     current = tmp;
     index++;
   }
-  //expand variables here @todo
-  //expandVar(cmd);
+  cmd->argv[index] = NULL;
+  //build envp array
+  int envLength = 0;
+  profile_t *env_var = *(env);
+  for (; env_var != NULL; env_var = env_var->next) envLength++;
+  cmd->envp = malloc(sizeof(char*) * (envLength + 1));
+  index = 0;
+  env_var = *(env);
+  while (env_var != NULL) {
+    cmd->envp[index] = malloc(sizeof(char) * 
+			      (strlen(env_var->var.name) + 
+			       strlen(env_var->var.value) + 
+			       1));
+    cmd->envp[index][0] = '\0';
+    strcat(cmd->envp[index], env_var->var.name);
+    strcat(cmd->envp[index], "=");
+    strcat(cmd->envp[index], env_var->var.value);
+    env_var = env_var->next;
+    index++;
+  }
+  cmd->envp[index] = NULL;
+  //parsing specific to special commands
+  //parseSpecial(cmd, env);
   return cmd;
 }
 
@@ -191,7 +213,7 @@ void parseProfile(environment_t env) {
  * generate full path if file is found in path
  * @param {char*} file filename to look for
  * @param {var_t*} path path environment variable
- * @returns {char*} full path string dynamically allocated
+ * @returns {char*} full path string <malloc>
  */
 char* getFullPath(const char *file, var_t *path) {
   char *tmp_path = malloc(sizeof(char) * strlen(path->value));
@@ -231,10 +253,31 @@ void execCommand(command_t *cmd, environment_t env) {
     var.name = cmd->argv[1];
     var.value = cmd->argv[2];
     updateEnvVar(env, var);
+    return;
+  }
+  if (strcmp(cmd->argv[0], CMD_CD) == 0) {
+    chdir(cmd->argv[1]);
+    return;
+  }
+  if (strcmp(cmd->argv[0], CMD_EXIT) == 0) {
+    exit(0);
   }
   //normal command execution
-      char *full_path = getFullPath(cmd->argv[0], 
-				    getEnvVar(env,"PATH"));
+  char *full_path = getFullPath(cmd->argv[0], getEnvVar(env,"PATH"));
+  pid_t pid = fork();
+  if (pid < 0) {
+    //error
+    fatalError("Fork failed while executing command");
+  }
+  else if (pid == 0){
+    //child
+    execve(full_path, cmd->argv, cmd->envp);
+  }
+  else {
+    //parent
+    waitpid(pid, &cmd->exitStatus, 0);
+  }
+  free(full_path);
 }
 
 //couple of helpers to deal with environment variables
@@ -313,4 +356,40 @@ if (var.name != NULL && var.value != NULL) {
     *(env) = tmp;
   }
  }
+}
+
+//memory free helpers
+
+void deleteCommand(command_t *cmd) {
+  int i;
+  p_string_t tmp = cmd->argv;
+  while (*tmp != NULL) {
+    free(*tmp);
+    tmp = tmp + 1;
+  }
+  free(cmd->argv);
+  tmp = cmd->envp;
+  while (*tmp != NULL) {
+    free(*tmp);
+    tmp = tmp + 1;
+  }
+  free(cmd->envp);
+  //@todo free other fields
+  free(cmd);
+}
+
+/*
+ * free environment variables list
+ * @param {environment_t} env environment variable list
+ */
+void deleteEnv(environment_t env) {
+  profile_t *current = *(env);
+  while (current != NULL) {
+    profile_t *tmp = current->next;
+    free(current->var.name);
+    free(current->var.value);
+    free(current);
+    current = tmp;
+  }
+  free(env);
 }

@@ -26,10 +26,9 @@ typedef struct profile_elem{
 
 typedef struct {
   p_string_t argv;
+  p_string_t envp;
   int argc;
-  int exitVal;
-  p_string_t output;
-  p_string_t error;
+  int exitStatus;
 } command_t;
 
 typedef profile_t** environment_t;
@@ -95,5 +94,14 @@ void updateEnvVar(environment_t env, var_t var);
  * @returns {environment_t}
  */
 environment_t createEnv();
+
+
+//utilities for memory handling
+
+/*
+ * free memory occupied by a command properly
+ * @param {command_t*} cmd cmd to free
+ */
+void deleteCommand(command_t *cmd);
 
 #endif
