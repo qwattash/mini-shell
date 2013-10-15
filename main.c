@@ -18,8 +18,14 @@ int main (int argc, char *argv[], char *envp[]) {
   //find PATH
   //main command listening loop
   command_t *cmd;
+  char buffer[MAX_COMMAND_LENGTH];
   while (true) {
-    cmd = prompt(home->var);
+    prompt(home->var, buffer);
+    cmd = parseCommand(buffer, &profileList);
+    int i = 0;
+    for (; i < cmd->argc; i++) {
+      printf("arg %d: %s\n", i, cmd->argv[i]);
+    }
     break;
     }
   exit(0);
