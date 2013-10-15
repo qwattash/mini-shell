@@ -39,9 +39,7 @@ if (var.name != NULL && var.value != NULL) {
  *  note that strings in var are dynamically allocated and need to
  *  be freed
  */
-bool parseVar(char *buffer, var_t *var) {
-  var->name = NULL;
-  var->value = NULL;
+var_t* parseVar(char *buffer) {
   //strip leading and trailing spaces and comments
   stripWhitespaces(buffer);
   char *comment = strchr(buffer, '#');
@@ -50,11 +48,12 @@ bool parseVar(char *buffer, var_t *var) {
   //parse string
   if (strlen(buffer) == 0)
     //empty string or comment, no variable parsed
-    return true;
+    return NULL;
   char *var_delim = strchr(buffer, '=');
   if (var_delim == NULL) {
-    return false;
+    return NULL;
   }
+  var_t *var = malloc(sizeof(var_t));
   int length = (var_delim - buffer);
   var->name = malloc(sizeof(char) * length + 1);
   strncpy(var->name, buffer, length);
@@ -64,7 +63,7 @@ bool parseVar(char *buffer, var_t *var) {
   var->value = malloc(sizeof(char) * length + 1);
   strncpy(var->value, var_delim + 1, length + 1);
   stripWhitespaces(var->value);
-  return true;
+  return var;
 }
 
 command_t* parseCommand(char *buffer) {
@@ -73,15 +72,22 @@ command_t* parseCommand(char *buffer) {
 
 }
 
+/*
+ * prompt the user for a command
+ * @param {var_t} home home evironment variable
+ * @param {profile_t**} profileList list of environment variables
+ * @returns {command_t*} parsed command or NULL
+ */
 command_t *prompt(var_t home, profile_t **profileList) {
   char buffer[MAX_COMMAND_LENGTH + 1];
-  var_t var;
+  var_t *var;
   command_t *cmd;
   printf("%s>", home.value);
   fgets(buffer, MAX_COMMAND_LENGTH, stdin);
-  if (parseVar(buffer, &var)) {
+  if (var = parseVar(buffer)) {
     //if user entered variable assignment
-    updateVar(var, profileList);
+    updateVar(*var, profileList);
+    free(var);
   }
   else if((cmd = parseCommand(buffer)) != NULL){
     return NULL;
@@ -109,27 +115,26 @@ void parseProfile(profile_t **profileList) {
   //open profile file in current working dir
   profileFile = fopen(profilePath, "r");
   if (profileFile == NULL) {
-    printf("Error,could not open profile file at %s\n", profilePath);
+    printf("Error, could not open profile file at %s\n", profilePath);
     free(profilePath);
     exit(1);
   }
   free(profilePath);
   //parse profile file content
-  var_t var;
+  var_t *var = NULL;
   while (!feof(profileFile)) {
     fgets(buffer, sizeof(buffer), profileFile);
-    if (! parseVar(buffer, &var)) {
-      //error while parsing
-      printf("Error parsing profile file");
-      exit(1);
-    };
-    if (var.name != NULL && var.value != NULL) {
-      updateVar(var, profileList);
+    var = parseVar(buffer);
+    if (var == NULL) continue;
+    if (var->name != NULL && var->value != NULL) {
+      updateVar(*var, profileList);
+      free(var);
     }
     else {
       //unused var
-      free(var.name);
-      free(var.value);
+      free(var->name);
+      free(var->value);
+      free(var);
     }
   }
 }
