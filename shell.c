@@ -9,11 +9,26 @@ const char CMD_EXIT[] = "exit";
 //buffer for command parsing
 const int MAX_COMMAND_LENGTH = 512;
 
+//enum used to parse commands
 typedef enum {
   PARSE_ESCAPE, 
   PARSE_STRING, 
   PARSE_NORMAL
 } commandParseState_t; 
+
+//list used to parse commands
+typedef struct argv_list {
+  struct argv_list* next;
+  char *value;
+} argv_t;
+
+//"private" functions
+var_t* parseVar(char *buffer);
+void parseSpecial(command_t *cmd, environment_t env);
+char* getFullPath(const char *file, var_t *path);
+char* getCurrentWorkingDirectory();
+int command2List(argv_t **head, char *cmdString);
+void expandEnv(command_t *cmd, environment_t env);
 
 /*
  * parse a profile variable from a string
@@ -57,8 +72,11 @@ var_t* parseVar(char *buffer) {
  */
 void parseSpecial(command_t *cmd, environment_t env) {
   if (strcmp(cmd->argv[0], CMD_CD) == 0) {
+    //parse special meaning for no argument
     //parse special meaning for ~
-    if (strcmp(cmd->argv[1], "~") == 0) {
+    if (cmd->argc == 1 || 
+	(cmd->argc == 2 && (strcmp(cmd->argv[1], "~") == 0))) 
+      {
       var_t *home = getEnvVar(env, "HOME");
       free(cmd->argv[1]);
       cmd->argv[1] = malloc(sizeof(char) * 
@@ -69,11 +87,50 @@ void parseSpecial(command_t *cmd, environment_t env) {
 }
 
 /*
+ * put command arguments in a temporary list
+ * @param {argv_t**} head head of the list
+ * @param {char*} buffer command to be parsed
+ * @returns {int} arguments count
+ */
+int command2List(argv_t **head, char *buffer) {
+  //use a copy of buffer because strtok modifies its input
+  char tmp[MAX_COMMAND_LENGTH];
+  strcpy(tmp, buffer);
+  commandParseState_t state = PARSE_NORMAL; //unused
+  char *tok = strtok(tmp, " ");
+  int argc = 0;
+  while (tok != NULL) {
+    argv_t *current;
+    //insert token in the list
+    if (*(head) == NULL) {
+      //empty list case
+      *(head) = malloc(sizeof(argv_t));
+      current = *(head);
+      current->next = NULL;
+    }
+    else {
+      //append to list
+      for(current = *(head); current->next != NULL; current = current->next);
+      current->next = malloc(sizeof(argv_t));
+      current->next->next = NULL;
+      current = current->next;
+    }
+    current->value = malloc(sizeof(char) * (strlen(tok) + 1));
+    strcpy(current->value, tok);
+    //increment argc
+    argc++;
+    //go on with parsing the string
+    tok = strtok(NULL, " ");
+  }
+  return argc;
+}
+
+/*
  * parse a command
  * @param {char*} buffer input string
  * @param {environment_t} env pointer to head of environment
  * variables list
- * @returns {command_t*} parsed command dynamically allocated
+ * @returns {command_t*} parsed command <malloc>
  */
 command_t* parseCommand(char *buffer, environment_t env) {
   command_t *cmd = malloc(sizeof(command_t));
@@ -94,45 +151,9 @@ command_t* parseCommand(char *buffer, environment_t env) {
     return cmd;
   }
   //if it is an actual command
-  /*parse command, arguments are put in a temporary list
-   * and then moved into an array
-   */
-  typedef struct argv_list {
-    struct argv_list* next;
-    char *value;
-  } argv_t;
   argv_t *list = NULL;
-  //use a copy of buffer because strtok modifies its input
-  char tmp[MAX_COMMAND_LENGTH];
-  strcpy(tmp, buffer);
-  commandParseState_t state = PARSE_NORMAL; //unused
-  char *tok = strtok(tmp, " ");
-  int argc = 0;
-  while (tok != NULL) {
-    argv_t *current;
-    //insert token in the list
-    if (list == NULL) {
-      //empty list case
-      list = malloc(sizeof(argv_t));
-      current = list;
-      current->next = NULL;
-    }
-    else {
-      //append to list
-      for(current = list; current->next != NULL; current = current->next);
-      current->next = malloc(sizeof(argv_t));
-      current->next->next = NULL;
-      current = current->next;
-    }
-    current->value = malloc(sizeof(char) * (strlen(tok) + 1));
-    strcpy(current->value, tok);
-    //increment argc
-    argc++;
-    //go on with parsing the string
-    tok = strtok(NULL, " ");
-  }
+  cmd->argc = command2List(&list, buffer);
   //build argv array
-  cmd->argc = argc;
   //last argv location is set to NULL
   cmd->argv = malloc(sizeof(char*) * (cmd->argc + 1));
   argv_t *current = list;
@@ -167,6 +188,8 @@ command_t* parseCommand(char *buffer, environment_t env) {
   cmd->envp[index] = NULL;
   //parsing specific to special commands
   parseSpecial(cmd, env);
+  //expand $ variables
+  expandEnv(cmd, env);
   return cmd;
 }
 
@@ -175,10 +198,14 @@ command_t* parseCommand(char *buffer, environment_t env) {
  * @param {environment_t} env evironment variables list
  * @param {char*} env list of environment variables
  */
-void prompt(environment_t env, char *cmd) {
-  var_t *home = getEnvVar(env, "HOME");
-  printf("%s>", home->value);
+void prompt(char *cmd) {
+  char *cwd = getCurrentWorkingDirectory();
+  if (cwd != NULL) 
+    printf("%s>", cwd);
+  else 
+    printf("unknown>");
   fgets(cmd, MAX_COMMAND_LENGTH, stdin);
+  free(cwd);
 }
 
 /*
@@ -186,17 +213,17 @@ void prompt(environment_t env, char *cmd) {
  * @param {environment_t} env environment variables list
  */
 void parseProfile(environment_t env) {
-  char buffer[1024];
-  if (getcwd(buffer, sizeof(buffer)) == NULL) {
+  char *cwd = getCurrentWorkingDirectory();
+  if (cwd == NULL) {
     printf("Error, could not get current working directory");
     exit(1);
   }
   char *profilePath;
   profilePath = malloc(sizeof(char) * 
-		       (strlen(buffer) + strlen(PROFILE_FILE_NAME) + 1));
-  memset(profilePath, '\0', sizeof(char) * 
-	 (strlen(buffer) + strlen(PROFILE_FILE_NAME)) + 1);
-  strcat(profilePath, buffer);
+		       (strlen(cwd) + 
+			strlen(PROFILE_FILE_NAME) + 1));
+  profilePath[0] = '\0';
+  strcat(profilePath, cwd);
   strcat(profilePath, "/");
   strcat(profilePath, PROFILE_FILE_NAME);
   FILE *profileFile;
@@ -208,8 +235,10 @@ void parseProfile(environment_t env) {
     exit(1);
   }
   free(profilePath);
+  free(cwd);
   //parse profile file content
   var_t *var = NULL;
+  char buffer[1024];
   while (!feof(profileFile)) {
     fgets(buffer, sizeof(buffer), profileFile);
     var = parseVar(buffer);
@@ -225,6 +254,12 @@ void parseProfile(environment_t env) {
       free(var);
     }
   }
+  //set cwd to home
+  var_t *home = getEnvVar(env, "HOME");
+  if (home != NULL) {
+    chdir(home->value);
+  }
+  //else leave cwd as-is
 }
 
 /*
@@ -380,6 +415,44 @@ if (var.name != NULL && var.value != NULL) {
  }
 }
 
+/*
+ * expand $ variables between unescaped expansion operators {}
+ * @param {command_t*} cmd expand variables in cmd->argv
+ * @param {environment_t} env used to read variables
+ */
+void expandEnv(command_t *cmd, environment_t env) {
+  p_string_t current_arg = cmd->argv;
+  char *token = NULL;
+  var_t *var = NULL;
+  char *tmp = NULL;
+  int pre_token_length = 0;
+  while (*(current_arg) != NULL) {
+    //look for multiple specal char $
+    token = findUnescapedChar(*(current_arg), '$');
+    while (token != NULL) {
+      /*
+       * calculate length before skipping the $
+       * so when the string before $ will be copied 
+       * the $ symbol will not be in
+       */
+      pre_token_length = (token - *(current_arg));
+      token++;
+      //if special symbol $ is found in the string
+      if ((var = getEnvVar(env, token)) != NULL) {
+	tmp = malloc(sizeof(char) * 
+		     (pre_token_length + strlen(var->value) + 1));
+	tmp[0] = '\0';
+	strncpy(tmp, *(current_arg), pre_token_length);
+	strcat(tmp, var->value);
+	free(*(current_arg));
+	*(current_arg) = tmp;
+      }
+      token = findUnescapedChar(token, '$');
+    }
+    current_arg++;
+  }
+}
+
 //memory free helpers
 
 void deleteCommand(command_t *cmd) {
@@ -414,4 +487,27 @@ void deleteEnv(environment_t env) {
     current = tmp;
   }
   free(env);
+}
+
+//helper for getting current working directory
+/*
+ * get current working dir path independently from its size
+ * @retruns {char*} cwd path <malloc>
+ */
+char* getCurrentWorkingDirectory() {
+  const int size_step = 128;
+  int current_size = size_step;
+  char *cwd = malloc(sizeof(char) * size_step);
+  while (getcwd(cwd, current_size) == NULL) {
+    free(cwd);
+    if (errno == ERANGE) {
+      //cwd string is too big
+      current_size += size_step;
+      cwd = malloc(sizeof(char) * current_size);
+    }
+    else {
+      return NULL;
+    }
+  }
+  return cwd;
 }

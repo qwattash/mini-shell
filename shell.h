@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <errno.h>
 #include <sys/types.h>
 #include <dirent.h>
 
@@ -38,9 +39,9 @@ extern const int MAX_COMMAND_LENGTH;
 /*
  * prompt the user and parse the command
  * @param {environment_t} env environment variables list
- * @param {char*} buffer where to put command string
+ * @param {char*} cmd where to put command string
  */
-void prompt(environment_t env, char *buffer);
+void prompt(char *cmd);
 
 /*
  * parse profile file and fill given structure accordingly
@@ -103,5 +104,11 @@ environment_t createEnv();
  * @param {command_t*} cmd cmd to free
  */
 void deleteCommand(command_t *cmd);
+
+/*
+ * free memory occupied by an environment var list
+ * @param {environment_t} env list to free
+ */
+void deleteEnv(environment_t env);
 
 #endif

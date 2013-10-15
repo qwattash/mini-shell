@@ -12,7 +12,7 @@ int main (int argc, char *argv[], char *envp[]) {
   command_t *cmd;
   char buffer[MAX_COMMAND_LENGTH];
   while (true) {
-    prompt(env, buffer);
+    prompt(buffer);
     cmd = parseCommand(buffer, env);
     execCommand(cmd, env);
     deleteCommand(cmd);
