@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <dirent.h>
+
 #include "util.h"
 #include "error.h"
 
@@ -51,6 +54,31 @@ void parseProfile(profile_t **);
  * @returns {command_t*} parsed command
  */
 command_t* parseCommand(char *buffer, profile_t **profileList);
-void execCommand(command_t*);
+
+/*
+ * execute given command
+ * @param {command_t*} cmd command to execute
+ * @param {var_t*} path pointer to path environment var
+ */
+void execCommand(command_t *cmd, var_t *path);
+
+//utilities for env variables handling
+
+/*
+ * check that PATH and HOME are set correctly
+ * @param {profile_t*} profileList first element of environment var
+ * list
+ * @returns {bool}
+ */
+bool checkShellEnv(profile_t *profileList);
+
+/*
+ * get environment variable from name
+ * @param {profile_t*} profileList first element of environment var 
+ * list
+ * @param {const char*} name name of the var to look for
+ * @returns {var_t*} pointer to env var
+ */
+var_t* getEnvVar(profile_t *profileList, const char *name);
 
 #endif

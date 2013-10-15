@@ -72,6 +72,13 @@ var_t* parseVar(char *buffer) {
   return var;
 }
 
+/*
+ * parse a command
+ * @param {char*} buffer input string
+ * @param {profile_t **} profileList pointer to head of environment
+ * variables list
+ * @returns {command_t*} parsed command dynamically allocated
+ */
 command_t* parseCommand(char *buffer, profile_t **profileList) {
   //check if command inserted is a variable assignment
   var_t *var = parseVar(buffer);
@@ -152,7 +159,7 @@ void parseProfile(profile_t **profileList) {
   }
   char *profilePath;
   profilePath = malloc(sizeof(char) * 
-		       (strlen(buffer) + strlen(PROFILE_FILE_NAME)));
+		       (strlen(buffer) + strlen(PROFILE_FILE_NAME) + 1));
   memset(profilePath, '\0', sizeof(char) * 
 	 (strlen(buffer) + strlen(PROFILE_FILE_NAME)) + 1);
   strcat(profilePath, buffer);
@@ -186,4 +193,80 @@ void parseProfile(profile_t **profileList) {
   }
 }
 
-void execCommand(command_t *command) {}
+/*
+ * generate full path if file is found in path
+ * @param {char*} file filename to look for
+ * @param {var_t*} path path environment variable
+ * @returns {char*} full path string dynamically allocated
+ */
+char* getFullPath(const char *file, var_t *path) {
+  char *tmp_path = malloc(sizeof(char) * strlen(path->value));
+  strcpy(tmp_path, path->value);
+  char *full_path = NULL;
+  char *tok = strtok(tmp_path, ":");
+  while (tok != NULL) {
+    DIR *dir = opendir(tok);
+    if (dir == NULL) fatalError("PATH directory does not exist");
+    struct dirent *dir_entity = readdir(dir);
+    while (dir_entity != NULL) {
+      if (strcmp(dir_entity->d_name, file) == 0) {
+	//found file in this directory
+	full_path = malloc(sizeof(char) * (strlen(file) + strlen(tok)+ 2));
+	full_path[0] = '\0';
+	strcat(full_path, tok);
+	strcat(full_path, "/");
+	strcat(full_path, file);
+	break;
+      }
+      dir_entity = readdir(dir);
+    }
+    tok = strtok(NULL, ":");
+  }
+  return full_path;
+}
+
+void execCommand(command_t *cmd, var_t *path) {
+  char *full_path = getFullPath(cmd->argv[0], path);
+}
+
+//couple of helpers to deal with environment variables
+
+/*
+ * check that PATH and HOME are set correctly
+ * @param {profile_t*} profileList first element of environment var
+ * list
+ * @returns {bool}
+ */
+bool checkShellEnv(profile_t *profileList) {
+  //particular env vars that are required
+  var_t *home = getEnvVar(profileList, "HOME"); 
+  var_t *path = getEnvVar(profileList, "PATH");
+  //find PATH and HOME
+  if (home == NULL || path == NULL) return false;
+  if (opendir(home->value) == NULL)
+    return false;
+  char *tmp_path = malloc(sizeof(char) * strlen(path->value));
+  strcpy(tmp_path, path->value);
+  char *tok = strtok(tmp_path, ":");
+  while (tok != NULL) {
+    if (opendir(tok) == NULL) return false;
+    tok = strtok(NULL, ":");
+  }
+  return true;
+}
+
+/*
+ * get environment variable from name
+ * @param {profile_t*} profileList first element of environment var 
+ * list
+ * @param {const char*} name name of the var to look for
+ * @returns {var_t*} pointer to env var
+ */
+var_t* getEnvVar(profile_t *profileList, const char *name) {
+  for (; profileList != NULL; profileList = profileList->next) {
+    if (strcmp(profileList->var.name, name) == 0) {
+      return &(profileList->var);
+    }
+  }
+  return NULL;
+}

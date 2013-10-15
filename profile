@@ -4,9 +4,4 @@
 
 HOME=/home/qwattash
 
-
-PATH=/bullshit/stuff/shitty:/noob
-
 PATH=/usr/bin:/usr/local/bin
-
-HOME=/bullshit/home
