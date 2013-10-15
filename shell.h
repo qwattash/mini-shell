@@ -32,53 +32,68 @@ typedef struct {
   p_string_t error;
 } command_t;
 
+typedef profile_t** environment_t;
+
 extern const int MAX_COMMAND_LENGTH;
 
 /*
  * prompt the user and parse the command
- * @param {var_t} home home variable
+ * @param {environment_t} env environment variables list
  * @param {char*} buffer where to put command string
  */
-void prompt(var_t home, char *buffer);
+void prompt(environment_t env, char *buffer);
 
 /*
  * parse profile file and fill given structure accordingly
+ * @param {environment_t} environment list
  */
-void parseProfile(profile_t **);
+void parseProfile(environment_t);
 
 /*
  * parse shellCommand
  * @param {char*} buffer input command to parse
- * @param {profile_t*} profileList list of environment variables 
+ * @param {profile_t*} env list of environment variables 
  * for expansion
  * @returns {command_t*} parsed command
  */
-command_t* parseCommand(char *buffer, profile_t **profileList);
+command_t* parseCommand(char *buffer, environment_t env);
 
 /*
  * execute given command
  * @param {command_t*} cmd command to execute
- * @param {var_t*} path pointer to path environment var
+ * @param {environment_t} env environment var list
  */
-void execCommand(command_t *cmd, var_t *path);
+void execCommand(command_t *cmd, environment_t env);
 
 //utilities for env variables handling
 
 /*
  * check that PATH and HOME are set correctly
- * @param {profile_t*} profileList first element of environment var
+ * @param {environment_t} env environment variables list
  * list
  * @returns {bool}
  */
-bool checkShellEnv(profile_t *profileList);
+bool checkShellEnv(environment_t env);
 
 /*
  * get environment variable from name
- * @param {profile_t*} profileList first element of environment var 
- * list
+ * @param {environment_t} env environment var list
  * @param {const char*} name name of the var to look for
  * @returns {var_t*} pointer to env var
  */
-var_t* getEnvVar(profile_t *profileList, const char *name);
+var_t* getEnvVar(environment_t env, const char *name);
+
+/*
+ * update environment variable or add unexisting one
+ * @param {environment_t} env list of environment variables
+ * @param {var_t} var variable structure
+ */
+void updateEnvVar(environment_t env, var_t var);
+
+/*
+ * create environment variables list and init it
+ * @returns {environment_t}
+ */
+environment_t createEnv();
 
 #endif

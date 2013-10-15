@@ -1,6 +1,10 @@
 #include "shell.h"
 
+//name of profile config file
 const char PROFILE_FILE_NAME[] = "profile";
+//variable assignment special command
+const char CMD_ASSIGN[] = "=";
+//buffer for command parsing
 const int MAX_COMMAND_LENGTH = 512;
 
 typedef enum {
@@ -8,34 +12,6 @@ typedef enum {
   PARSE_STRING, 
   PARSE_NORMAL
 } commandParseState_t; 
-
-/*
- * update environment variable or add unexisting one
- * @param {var_t} var variable structure
- * @param {profile_t*} profileList list of environment variables
- */
-void updateVar(var_t var, profile_t **profileList) {
-if (var.name != NULL && var.value != NULL) {
-  //search for already declared variable
-  profile_t *found = *(profileList);
-  for (; found != NULL; found = found->next) {
-    if (strcmp(found->var.name, var.name) == 0) break;
-  }
-  if (found != NULL) {
-    free(found->var.value);
-    found->var.value = var.value;
-  }
-  else {
-    //append var in the profileList
-    profile_t *tmp = malloc(sizeof(profile_t));
-    tmp->var.name = var.name;
-    tmp->var.value = var.value;
-    tmp->next = *(profileList);
-    *(profileList) = tmp;
-  }
- }
-}
-
 
 /*
  * parse a profile variable from a string
@@ -75,18 +51,31 @@ var_t* parseVar(char *buffer) {
 /*
  * parse a command
  * @param {char*} buffer input string
- * @param {profile_t **} profileList pointer to head of environment
+ * @param {environment_t} env pointer to head of environment
  * variables list
  * @returns {command_t*} parsed command dynamically allocated
  */
-command_t* parseCommand(char *buffer, profile_t **profileList) {
+command_t* parseCommand(char *buffer, environment_t env) {
+  command_t *cmd = malloc(sizeof(command_t));
+  //init command to avoid random behavior in case of error
+  cmd->argc = 0;
+  cmd->argv = NULL;
+  cmd->exitVal = 0;
+  cmd->output = NULL;
+  cmd->error = NULL;
   //check if command inserted is a variable assignment
   var_t *var = parseVar(buffer);
   if (var != NULL) {
-    updateVar(*var, profileList);
-    return NULL;
+    cmd->argc = 3;
+    cmd->argv = malloc(cmd->argc * sizeof(char*));
+    cmd->argv[0] = malloc(sizeof(char) * strlen(CMD_ASSIGN));
+    strcpy(cmd->argv[0], CMD_ASSIGN);
+    cmd->argv[1] = var->name;
+    cmd->argv[2] = var->value;
+    free(var);
+    return cmd;
   }
-  command_t *cmd = malloc(sizeof(command_t));
+  //if it is an actual command
   /*parse command, arguments are put in a temporary list
    * and then moved into an array
    */
@@ -143,15 +132,20 @@ command_t* parseCommand(char *buffer, profile_t **profileList) {
 
 /*
  * prompt the user for a command
- * @param {var_t} home home evironment variable
- * @param {profile_t**} profileList list of environment variables
+ * @param {environment_t} env evironment variables list
+ * @param {char*} env list of environment variables
  */
-void prompt(var_t home, char *cmd) {
-  printf("%s>", home.value);
+void prompt(environment_t env, char *cmd) {
+  var_t *home = getEnvVar(env, "HOME");
+  printf("%s>", home->value);
   fgets(cmd, MAX_COMMAND_LENGTH, stdin);
 }
 
-void parseProfile(profile_t **profileList) {
+/*
+ * parse profile file
+ * @param {environment_t} env environment variables list
+ */
+void parseProfile(environment_t env) {
   char buffer[1024];
   if (getcwd(buffer, sizeof(buffer)) == NULL) {
     printf("Error, could not get current working directory");
@@ -181,7 +175,7 @@ void parseProfile(profile_t **profileList) {
     var = parseVar(buffer);
     if (var == NULL) continue;
     if (var->name != NULL && var->value != NULL) {
-      updateVar(*var, profileList);
+      updateEnvVar(env, *var);
       free(var);
     }
     else {
@@ -225,22 +219,45 @@ char* getFullPath(const char *file, var_t *path) {
   return full_path;
 }
 
-void execCommand(command_t *cmd, var_t *path) {
-  char *full_path = getFullPath(cmd->argv[0], path);
+void execCommand(command_t *cmd, environment_t env) {
+  if (cmd->argc <= 0) {
+    //empty or unparsed command
+    return;
+  }
+  //check for special commands
+  if (strcmp(cmd->argv[0], CMD_ASSIGN) == 0) {
+    //variable assignment command
+    var_t var;
+    var.name = cmd->argv[1];
+    var.value = cmd->argv[2];
+    updateEnvVar(env, var);
+  }
+  //normal command execution
+      char *full_path = getFullPath(cmd->argv[0], 
+				    getEnvVar(env,"PATH"));
 }
 
 //couple of helpers to deal with environment variables
 
 /*
+ * create environment variables list and init it
+ * @returns {environment_t}
+ */
+environment_t createEnv() {
+  environment_t head = malloc(sizeof(profile_t*));
+  *(head) = NULL;
+  return head;
+}
+
+/*
  * check that PATH and HOME are set correctly
- * @param {profile_t*} profileList first element of environment var
- * list
+ * @param {environment_t} env environment var list
  * @returns {bool}
  */
-bool checkShellEnv(profile_t *profileList) {
+bool checkShellEnv(environment_t env) {
   //particular env vars that are required
-  var_t *home = getEnvVar(profileList, "HOME"); 
-  var_t *path = getEnvVar(profileList, "PATH");
+  var_t *home = getEnvVar(env, "HOME"); 
+  var_t *path = getEnvVar(env, "PATH");
   //find PATH and HOME
   if (home == NULL || path == NULL) return false;
   if (opendir(home->value) == NULL)
@@ -257,16 +274,43 @@ bool checkShellEnv(profile_t *profileList) {
 
 /*
  * get environment variable from name
- * @param {profile_t*} profileList first element of environment var 
- * list
+ * @param {environment_t} env environment var list
  * @param {const char*} name name of the var to look for
  * @returns {var_t*} pointer to env var
  */
-var_t* getEnvVar(profile_t *profileList, const char *name) {
-  for (; profileList != NULL; profileList = profileList->next) {
-    if (strcmp(profileList->var.name, name) == 0) {
-      return &(profileList->var);
+var_t* getEnvVar(environment_t env, const char *name) {
+  profile_t *current = *(env);
+  for (; current != NULL; current = current->next) {
+    if (strcmp(current->var.name, name) == 0) {
+      return &(current->var);
     }
   }
   return NULL;
+}
+
+/*
+ * update environment variable or add unexisting one
+ * @param {environment_t} env list of environment variables
+ * @param {var_t} var variable structure
+ */
+void updateEnvVar(environment_t env, var_t var) {
+if (var.name != NULL && var.value != NULL) {
+  //search for already declared variable
+  profile_t *found = *(env);
+  for (; found != NULL; found = found->next) {
+    if (strcmp(found->var.name, var.name) == 0) break;
+  }
+  if (found != NULL) {
+    free(found->var.value);
+    found->var.value = var.value;
+  }
+  else {
+    //append var in the profileList
+    profile_t *tmp = malloc(sizeof(profile_t));
+    tmp->var.name = var.name;
+    tmp->var.value = var.value;
+    tmp->next = *(env);
+    *(env) = tmp;
+  }
+ }
 }
