@@ -5,6 +5,7 @@ int main (int argc, char *argv[], char *envp[]) {
   
   environment_t env = createEnv();
   parseProfile(env);
+  OPTN_VAR_STARTER = '$';
   //check that PATH and HOME exists and are valid
   if (!checkShellEnv(env)) 
     fatalError("Environment Variable PATH and HOME are incorrect");

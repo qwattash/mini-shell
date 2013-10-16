@@ -34,7 +34,10 @@ typedef struct {
 
 typedef profile_t** environment_t;
 
+//max command length defined in shell.c
 extern const int MAX_COMMAND_LENGTH;
+//variable starting char defined in shell.c
+extern char OPTN_VAR_STARTER;
 
 /*
  * prompt the user and parse the command

@@ -2,6 +2,8 @@
 
 /*
  * @todos
+ * [bug] exit not working after invalid command console error
+ * seems like an exit() problem
  * [experimental] variable expansion
  * [feat] quotes parsing and escape sequences
  * [feat] pipes
@@ -15,7 +17,11 @@ const char CMD_CD[] = "cd";
 const char CMD_EXIT[] = "exit";
 //buffer for command parsing
 const int MAX_COMMAND_LENGTH = 512;
-
+/*
+ * determine variables parsing behavior, variable names must start
+ * with this symbol
+ */
+char OPTN_VAR_STARTER = '\0';
 //enum used to parse commands
 typedef enum {
   PARSE_ESCAPE, 
@@ -36,16 +42,20 @@ char* getFullPath(const char *file, var_t *path);
 char* getCurrentWorkingDirectory();
 int command2List(argv_t **head, char *cmdString);
 void expandEnv(command_t *cmd, environment_t env);
+bool checkHome(char *home);
+bool checkPath(char *path);
 
 /*
  * parse a profile variable from a string
  * @param {char*} buffer the string to parse
- * @param {profileVar_t*} var where to return the parsed variable
- *  note that strings in var are dynamically allocated and need to
- *  be freed
+ * @param {const char} pre charachter that notify the beginning of
+ * the var name, in some shells there is none (here \0) in others
+ * '$' is used
  * @returns {var_t*} new environment variable or NULL
  */
 var_t* parseVar(char *buffer) {
+  if (buffer == NULL) 
+    return NULL;
   //strip leading and trailing spaces and comments
   stripWhitespaces(buffer);
   char *comment = strchr(buffer, '#');
@@ -55,6 +65,27 @@ var_t* parseVar(char *buffer) {
   if (strlen(buffer) == 0)
     //empty string or comment, no variable parsed
     return NULL;
+  //if a variable starter symbol is defined
+  if (OPTN_VAR_STARTER != '\0') {
+    //check var name syntax
+    char *var_starter = strchr(buffer, OPTN_VAR_STARTER);
+    //note that if var_starter == NULL the error is catched anyway
+    //because buffer can not be null at this point
+    if (var_starter != buffer) { 
+      //syntax of variable is incorrect
+      return NULL;
+    }
+    else {
+      //remove var starter and parse normally
+      //strcpy manually because don't trust strcpy implementation
+      //for copying on the same buffer
+      char *dst = buffer;
+      var_starter++;
+      while (*var_starter != '\0')
+	*(dst++) = *(var_starter++);
+      *dst = '\0';
+    }
+  }
   char *var_delim = strchr(buffer, '=');
   if (var_delim == NULL) {
     return NULL;
@@ -78,6 +109,9 @@ var_t* parseVar(char *buffer) {
  * @pram {environment_t} env environment variables list
  */
 void parseSpecial(command_t *cmd, environment_t env) {
+  //if command is valid
+  if (cmd->argc == 0) 
+    return;
   if (strcmp(cmd->argv[0], CMD_CD) == 0) {
     //parse special meaning for no argument
     //parse special meaning for ~
@@ -113,7 +147,7 @@ int command2List(argv_t **head, char *buffer) {
   //use a copy of buffer because strtok modifies its input
   char tmp[MAX_COMMAND_LENGTH];
   strcpy(tmp, buffer);
-  commandParseState_t state = PARSE_NORMAL; //unused
+  commandParseState_t state = PARSE_NORMAL;
   char *tok = strtok(tmp, " ");
   int argc = 0;
   while (tok != NULL) {
@@ -324,6 +358,17 @@ void execCommand(command_t *cmd, environment_t env) {
   }
   //check for special commands
   if (strcmp(cmd->argv[0], CMD_ASSIGN) == 0) {
+    //if assigning to HOME or PATH verify assigment first
+    if (strcmp(cmd->argv[1], "HOME") == 0 && 
+	! checkHome(cmd->argv[2])) {
+      consoleError("invalid HOME");
+      return;
+    }
+    if (strcmp(cmd->argv[1], "PATH") == 0 &&
+	! checkPath(cmd->argv[2])) {
+      consoleError("invalid PATH");
+      return;
+    }
     //variable assignment command
     var_t var;
     //copy vars from cmd so if cmd is free'd it doesn't matter
@@ -348,7 +393,9 @@ void execCommand(command_t *cmd, environment_t env) {
   char *full_path = getFullPath(cmd->argv[0], getEnvVar(env,"PATH"));
   if (full_path == NULL) {
     consoleError("Unexisting command");
+    return;
   }
+  //fork
   pid_t pid = fork();
   if (pid < 0) {
     //error
@@ -387,17 +434,42 @@ bool checkShellEnv(environment_t env) {
   var_t *home = getEnvVar(env, "HOME"); 
   var_t *path = getEnvVar(env, "PATH");
   //find PATH and HOME
-  if (home == NULL || path == NULL) return false;
-  if (opendir(home->value) == NULL)
-    return false;
-  char *tmp_path = malloc(sizeof(char) * (strlen(path->value) + 1));
-  strcpy(tmp_path, path->value);
+  if (! checkHome(home->value)) return false;
+  if (! checkPath(path->value)) return false;
+  return true;
+}
+
+/*
+ * check that HOME var is set to a valid value
+ * @param {char*} home pointer to env var HOME value
+ * @returns {boolean}
+ */
+bool checkHome(char *home) {
+  if (home != NULL && opendir(home) != NULL)
+    return true;
+  return false;
+}
+
+/*
+ * check that PATH var is set to a valid value
+ * @param {char*} path pointer to env var PATH value
+ * @returns {boolean}
+ */
+bool checkPath(char *path) {
+  //strtok modify its input so make a copy
+  char *tmp_path = malloc(sizeof(char) * (strlen(path) + 1));
+  strcpy(tmp_path, path);
   char *tok = strtok(tmp_path, ":");
+  bool ok = true;
   while (tok != NULL) {
-    if (opendir(tok) == NULL) return false;
+    if (opendir(tok) == NULL) {
+      ok = false;
+      break;
+    }
     tok = strtok(NULL, ":");
   }
-  return true;
+  free(tmp_path);
+  return ok;
 }
 
 /*

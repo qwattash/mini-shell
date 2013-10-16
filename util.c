@@ -23,8 +23,25 @@ char* findUnescapedChar(char* str, const char c) {
   bool escaped = false;
   while (*(str) != '\0') {
     if (*str == '\\') escaped = !escaped;
+    else escaped = false;
     if (!escaped && *str == c) return str;
     str++;
   }
   return NULL;
 }
+
+/*
+ * unescape (\) string
+ * @param {char*} str str to be unescaped
+ */
+void unescape(char* str) {
+  bool escaped = false;
+  while (str != NULL) {
+    if (*str == '\\') escaped = !escaped;
+    else escaped = false;
+    if (escaped) {
+      //means that escape char is found and must be stripped
+      strncpy(str, str + 1, strlen(str + 1));
+    }
+  }
+} 
