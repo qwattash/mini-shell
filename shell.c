@@ -1,5 +1,12 @@
 #include "shell.h"
 
+/*
+ * @todos
+ * [experimental] variable expansion
+ * [feat] quotes parsing and escape sequences
+ * [feat] pipes
+ */
+
 //name of profile config file
 const char PROFILE_FILE_NAME[] = "profile";
 //variable assignment special command
@@ -75,12 +82,22 @@ void parseSpecial(command_t *cmd, environment_t env) {
     //parse special meaning for no argument
     //parse special meaning for ~
     if (cmd->argc == 1 || 
-	(cmd->argc == 2 && (strcmp(cmd->argv[1], "~") == 0))) 
-      {
+	(cmd->argc == 2 && (strcmp(cmd->argv[1], "~") == 0))) {
       var_t *home = getEnvVar(env, "HOME");
-      free(cmd->argv[1]);
+      if (cmd->argc == 2) {
+	free(cmd->argv[1]);
+      }
+      else {
+	cmd->argc = 2;
+	p_string_t tmp = malloc(sizeof(char*) * 3);
+	tmp[0] = cmd->argv[0];
+	tmp[1] = NULL;
+	tmp[2] = NULL;
+	free(cmd->argv);
+	cmd->argv = tmp;
+      }
       cmd->argv[1] = malloc(sizeof(char) * 
-			    (strlen(home->value) + 1));
+      			    (strlen(home->value) + 1));
       strcpy(cmd->argv[1], home->value);
     }
   }
@@ -137,16 +154,21 @@ command_t* parseCommand(char *buffer, environment_t env) {
   //init command to avoid random behavior in case of error
   cmd->argc = 0;
   cmd->argv = NULL;
+  cmd->envp = NULL;
   cmd->exitStatus = 0;
   //check if command inserted is a variable assignment
   var_t *var = parseVar(buffer);
   if (var != NULL) {
-    cmd->argc = 3;
+    cmd->argc = 4; 
+    //one argv slot is for NULL pointer signalisng 
+    //the end of the argv array
     cmd->argv = malloc(cmd->argc * sizeof(char*));
     cmd->argv[0] = malloc(sizeof(char) * (strlen(CMD_ASSIGN) + 1));
+    *(cmd->argv[0]) = '\0';
     strcpy(cmd->argv[0], CMD_ASSIGN);
     cmd->argv[1] = var->name;
     cmd->argv[2] = var->value;
+    cmd->argv[3] = NULL;
     free(var);
     return cmd;
   }
@@ -189,7 +211,7 @@ command_t* parseCommand(char *buffer, environment_t env) {
   //parsing specific to special commands
   parseSpecial(cmd, env);
   //expand $ variables
-  expandEnv(cmd, env);
+  //expandEnv(cmd, env);
   return cmd;
 }
 
@@ -304,13 +326,19 @@ void execCommand(command_t *cmd, environment_t env) {
   if (strcmp(cmd->argv[0], CMD_ASSIGN) == 0) {
     //variable assignment command
     var_t var;
-    var.name = cmd->argv[1];
-    var.value = cmd->argv[2];
+    //copy vars from cmd so if cmd is free'd it doesn't matter
+    var.name = malloc(sizeof(char) * (strlen(cmd->argv[1]) + 1));
+    strcpy(var.name, cmd->argv[1]);
+    var.value = malloc(sizeof(char) * (strlen(cmd->argv[2]) + 1));
+    strcpy(var.value, cmd->argv[2]);
     updateEnvVar(env, var);
     return;
   }
   if (strcmp(cmd->argv[0], CMD_CD) == 0) {
-    chdir(cmd->argv[1]);
+    if(chdir(cmd->argv[1]) == -1) {
+      //error
+      consoleError("can not cd there!");
+    }
     return;
   }
   if (strcmp(cmd->argv[0], CMD_EXIT) == 0) {
@@ -456,19 +484,23 @@ void expandEnv(command_t *cmd, environment_t env) {
 //memory free helpers
 
 void deleteCommand(command_t *cmd) {
-  int i;
-  p_string_t tmp = cmd->argv;
-  while (*tmp != NULL) {
-    free(*tmp);
-    tmp = tmp + 1;
+  p_string_t tmp;
+  if (cmd->argv != NULL) {
+    tmp = cmd->argv;
+    while (*tmp != NULL) {
+      free(*tmp);
+      tmp = tmp + 1;
+    }
+    free(cmd->argv);
   }
-  free(cmd->argv);
-  tmp = cmd->envp;
-  while (*tmp != NULL) {
-    free(*tmp);
-    tmp = tmp + 1;
+  if (cmd->envp != NULL) { 
+    tmp = cmd->envp;
+    while (*tmp != NULL) {
+      free(*tmp);
+      tmp = tmp + 1;
+    }
+    free(cmd->envp);
   }
-  free(cmd->envp);
   //@todo free other fields
   free(cmd);
 }
