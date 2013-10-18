@@ -2,7 +2,6 @@
 
 
 int main (int argc, char *argv[], char *envp[]) {
-  
   environment_t env = createEnv();
   parseProfile(env);
   OPTN_VAR_STARTER = '$';

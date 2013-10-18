@@ -3,7 +3,8 @@
 /*
  * @todos
  * [experimental] variable expansion
- * [feat] quotes parsing and escape sequences
+ * [experimental] quotes parsing and escape sequences
+ * above features compiles but hang in a loop
  * [feat] pipes
  */
 
@@ -20,12 +21,10 @@ const int MAX_COMMAND_LENGTH = 512;
  * with this symbol
  */
 char OPTN_VAR_STARTER = '\0';
-//enum used to parse commands
-typedef enum {
-  PARSE_ESCAPE, 
-  PARSE_STRING, 
-  PARSE_NORMAL
-} commandParseState_t; 
+//used to parse commands
+const unsigned char PARSE_VAR = (1 << 0);
+const unsigned char PARSE_STRING = (1 << 1);
+const unsigned char PARSE_NORMAL = (1 << 2);
 
 //list used to parse commands
 typedef struct argv_list {
@@ -38,7 +37,7 @@ var_t* parseVar(char *buffer);
 void parseSpecial(command_t *cmd, environment_t env);
 char* getFullPath(const char *file, var_t *path);
 char* getCurrentWorkingDirectory();
-int command2List(argv_t **head, char *cmdString);
+int command2List(argv_t **head, char *cmdString, environment_t env);
 void expandEnv(command_t *cmd, environment_t env);
 bool checkHome(char *home);
 bool checkPath(char *path);
@@ -136,40 +135,161 @@ void parseSpecial(command_t *cmd, environment_t env) {
 }
 
 /*
+ * add token to argv list
+ * @param {char*} str string to add
+ * @param {argv_t**} head head of the list
+ */
+void addToken(char *str, argv_t **head) {
+  if (strlen(str) == 0) 
+    return;
+  //unescape given argument
+  unescape(str);
+  argv_t *current;
+  //insert token in the list
+  if (*(head) == NULL) {
+    //empty list case
+    *(head) = malloc(sizeof(argv_t));
+    current = *(head);
+    current->next = NULL;
+  }
+  else {
+    //append to list
+    //iterate to the end
+    for(current = *(head); current->next != NULL; current = current->next);
+    //insert at the end
+    current->next = malloc(sizeof(argv_t));
+    current->next->next = NULL;
+    current = current->next;
+  }
+  //copy value string to new malloc string buffer
+  current->value = malloc(sizeof(char) * (strlen(str) + 1));
+  strcpy(current->value, str);
+}
+
+/*
  * put command arguments in a temporary list
  * @param {argv_t**} head head of the list
  * @param {char*} buffer command to be parsed
  * @returns {int} arguments count
  */
-int command2List(argv_t **head, char *buffer) {
+int command2List(argv_t **head, char *buffer, environment_t env) {
   //use a copy of buffer because strtok modifies its input
-  char tmp[MAX_COMMAND_LENGTH];
-  strcpy(tmp, buffer);
-  commandParseState_t state = PARSE_NORMAL;
-  char *tok = strtok(tmp, " ");
-  int argc = 0;
-  while (tok != NULL) {
-    argv_t *current;
-    //insert token in the list
-    if (*(head) == NULL) {
-      //empty list case
-      *(head) = malloc(sizeof(argv_t));
-      current = *(head);
-      current->next = NULL;
+  //char tmp[MAX_COMMAND_LENGTH];
+  //strcpy(tmp, buffer);
+  unsigned char state = PARSE_NORMAL;
+  //hold string currently being parsed in more than one step
+  char *tmp_parsed_string = NULL;
+  //hold buffers waiting to be free'd
+  char *tmp_free_holder = NULL;
+  //hold matched separator
+  char sep;
+  //token string <malloc> by findFirstUnescapedChar
+  char *tok = nextUnescapedTok(buffer, " \"$", &sep);
+  while(tok != NULL) {
+    if (sep == '"') {
+      //if was parsing normally
+      if (state & PARSE_NORMAL) {
+	//switch to string parsing mode
+	state = PARSE_STRING;
+	//append string normally before string operator
+	addToken(tok, head);
+      }
+      else if (state & PARSE_STRING) {
+	state = PARSE_NORMAL;
+	int alloc_length = strlen(tok);
+	//alloc new tmp_parsed_string (here it should be NULL)
+	tmp_parsed_string = strgrow(tmp_parsed_string, alloc_length);
+	//copy the string into the tmpbuffer withoutthe delimiter " 
+	strcat(tmp_parsed_string, tok);
+	//add parsed string as argument
+	addToken(tmp_parsed_string, head);
+	//free tmp_parsed string since it is not used by the list
+	free(tmp_parsed_string);
+	//set tmp_parsed_string to NULL for safety
+	tmp_parsed_string = NULL;
+      }
+    }
+    else if (sep == '$') {
+      state |= PARSE_VAR;
+      if (state & PARSE_STRING) {
+	//was parsing a string, append rest of token to
+	//tmp_parsed_string
+	tmp_free_holder = tmp_parsed_string;
+	tmp_parsed_string = strgrow(tmp_parsed_string, strlen(tok));
+	//free old string
+	if (tmp_free_holder != NULL) 
+	  free(tmp_free_holder);
+	//concat old string with new token
+	strcat(tmp_parsed_string, tok);
+      }
+      else if (state & PARSE_NORMAL) {
+	//was parsing normally, append new arg
+	addToken(tok, head);
+      }
     }
     else {
-      //append to list
-      for(current = *(head); current->next != NULL; current = current->next);
-      current->next = malloc(sizeof(argv_t));
-      current->next->next = NULL;
-      current = current->next;
+      //perform parsing tasks
+      if (state & PARSE_VAR) {
+	//end of variable is encountered
+	//reset old state
+	state &= !PARSE_VAR;
+	var_t *var = getEnvVar(env, tok);
+	if (state & PARSE_NORMAL) {
+	  //add var as arg
+	  if (var != NULL) addToken(var->value, head);
+	}
+	else if (state & PARSE_STRING) {
+	  tmp_free_holder = tmp_parsed_string;
+	  tmp_parsed_string = strgrow(tmp_parsed_string, 
+				      strlen(var->value));
+	//free old string
+	if (tmp_free_holder != NULL) 
+	  free(tmp_free_holder);
+	//append var to parsed string
+	strcat(tmp_parsed_string, var->value);
+	}
+      }
+      else if (state & PARSE_NORMAL) {
+	addToken(tok, head);
+      }
+      else if (state & PARSE_STRING) {
+	//a string is being parsed
+	//expand temp parsed string buffer, expand by 1 more to 
+	//make room for separator char to be put in
+	int extra = 0;
+	if (sep != '\0')
+	  extra = 1;
+	tmp_free_holder = tmp_parsed_string;
+	tmp_parsed_string = strgrow(tmp_parsed_string, 
+				    strlen(tok) + extra);
+	//free old string
+	if (tmp_free_holder != NULL) 
+	  free(tmp_free_holder);
+	//concat old string with new token
+	strcat(tmp_parsed_string, tok);
+	//add sepatator at the end of token because separator should
+	//not bestripped in this case
+	if (sep != '\0') { 
+	  tmp_parsed_string[strlen(tmp_parsed_string) + 1] = '\0';
+	  tmp_parsed_string[strlen(tmp_parsed_string)] = sep;
+	}
+      }
     }
-    current->value = malloc(sizeof(char) * (strlen(tok) + 1));
-    strcpy(current->value, tok);
-    //increment argc
+    printf("[d] current str: '%s'\n", tmp_parsed_string);
+    tmp_free_holder = tok;
+    buffer += strlen(tok); //skip token length
+    if (sep != '\0') buffer++; //skip separator char
+    tok = nextUnescapedTok(buffer, " \"$", &sep);
+    printf("[d] new token:'%s', match '%c'\n", tok, sep);
+    //free temporary token string
+    free(tmp_free_holder);
+  }
+  //debug print list
+  argv_t *c = *(head);
+  int argc = 0;
+  for (; c != NULL; c = c->next) {
+    printf("[d] arg %s\n", c->value);
     argc++;
-    //go on with parsing the string
-    tok = strtok(NULL, " ");
   }
   return argc;
 }
@@ -206,7 +326,7 @@ command_t* parseCommand(char *buffer, environment_t env) {
   }
   //if it is an actual command
   argv_t *list = NULL;
-  cmd->argc = command2List(&list, buffer);
+  cmd->argc = command2List(&list, buffer, env);
   //build argv array
   //last argv location is set to NULL
   cmd->argv = malloc(sizeof(char*) * (cmd->argc + 1));

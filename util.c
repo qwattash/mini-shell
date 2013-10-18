@@ -1,4 +1,5 @@
 #include "util.h"
+#include <stdio.h>
 
 /*
  * remove blanks from beginning and end of a string
@@ -14,6 +15,38 @@ void stripWhitespaces(char *str) {
 }
 
 /*
+ * find first unescaped (\) char in the string, the char to look
+ * for are passed as a string, this function leaves the given
+ * string intact but returns the matched token or \0
+ * this is a custom implementation of strtok
+ * @param {char*} str str to be evaluated 
+ * @param {const char*} delim chars to look for
+ * @param {char*} match matching delimiter, \0 in case of no match 
+ * or end of string
+ * @returns {char*} pointer to matching token <malloc>
+ */
+char* nextUnescapedTok(char *str, const char *delim, char *match) {
+  if (*str == '\0') {
+    *match = '\0';
+    return NULL;
+  }
+  char *end = str + (strlen(str));
+  char *tmp = NULL;
+  const char *curr_delim = delim;
+  while (*(curr_delim) != '\0') {
+    tmp = findUnescapedChar(str, *(curr_delim));
+    if (tmp != NULL && end > tmp) end = tmp;
+    curr_delim++;
+  }
+  //else return new string with token inside
+  tmp = malloc(sizeof(char) * (end - str + 1));
+  strncpy(tmp, str, (end - str));
+  tmp[(end - str)] = '\0';
+  *match = *end;
+  return tmp;
+}
+
+/*
  * find first unescaped (\) char in the string
  * @param {char*} str str to be evaluated 
  * @param {const char} c char to look for
@@ -22,9 +55,11 @@ void stripWhitespaces(char *str) {
 char* findUnescapedChar(char* str, const char c) {
   bool escaped = false;
   while (*(str) != '\0') {
-    if (*str == '\\') escaped = !escaped;
-    else escaped = false;
-    if (!escaped && *str == c) return str;
+    if (escaped) escaped = false;
+    else {
+      if (*str == '\\') escaped = true;
+      else if (*str == c) return str;
+    }
     str++;
   }
   return NULL;
@@ -35,13 +70,32 @@ char* findUnescapedChar(char* str, const char c) {
  * @param {char*} str str to be unescaped
  */
 void unescape(char* str) {
-  bool escaped = false;
-  while (str != NULL) {
-    if (*str == '\\') escaped = !escaped;
-    else escaped = false;
-    if (escaped) {
-      //means that escape char is found and must be stripped
-      strncpy(str, str + 1, strlen(str + 1));
-    }
+  char *dst = str;
+  char *curr = str;
+  while (*(curr) != '\0') {
+    if (*curr != '\\') *(dst++) = *curr;
+    curr++;
   }
+  *dst = '\0';
 } 
+
+//dynamic string helpers
+/*
+ * grows string to given size
+ * @param {char*} str string to grow
+ * @param {int} increment increment of size
+ * @returns {char*} new string <malloc>
+ */
+char* strgrow(char* str, int increment) {
+  char *tmp = NULL;
+  if (str == NULL) {
+    tmp = malloc(sizeof(char) * (increment + 1));
+    tmp[0] = '\0';
+  }
+  else {
+    tmp = malloc(sizeof(char) * 
+		       (strlen(str) + increment + 1));
+    strcpy(tmp, str);
+  }
+  return tmp;
+}
