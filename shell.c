@@ -2,8 +2,6 @@
 
 /*
  * @todos
- * [bug] exit not working after invalid command console error
- * seems like an exit() problem
  * [experimental] variable expansion
  * [feat] quotes parsing and escape sequences
  * [feat] pipes
@@ -387,6 +385,9 @@ void execCommand(command_t *cmd, environment_t env) {
     return;
   }
   if (strcmp(cmd->argv[0], CMD_EXIT) == 0) {
+    if (cmd->argc == 2) {
+      exit(atoi(cmd->argv[1]));
+    }
     exit(0);
   }
   //normal command execution
