@@ -113,25 +113,37 @@ void parseSpecial(command_t *cmd, environment_t env) {
   if (strcmp(cmd->argv[0], CMD_CD) == 0) {
     //parse special meaning for no argument
     //parse special meaning for ~
-    if (cmd->argc == 1 || 
-	(cmd->argc == 2 && (strcmp(cmd->argv[1], "~") == 0))) {
-      var_t *home = getEnvVar(env, "HOME");
-      if (cmd->argc == 2) {
-	free(cmd->argv[1]);
+    var_t *home = getEnvVar(env, "HOME");
+    if (cmd->argc == 1) {
+      //if cd without arguments was called
+      cmd->argc = 2;
+      //add home path as argument
+      p_string_t tmp = malloc(sizeof(char*) * 3);
+      tmp[0] = cmd->argv[0];
+      tmp[1] = malloc(sizeof(char) * (strlen(home->value) + 1));
+      tmp[2] = NULL;
+      strcpy(tmp[1], home->value);
+      //remove old argv because it was too short
+      free(cmd->argv);
+      cmd->argv = tmp;
+    } 
+    else if (cmd->argc == 2 && (strchr(cmd->argv[1], '~') == cmd->argv[1])) {
+      //create new string for the full path
+      //len = length of the two strings - num of char to strip + null char
+      int len = strlen(home->value) + strlen(cmd->argv[1]) - 1 + 1;
+      char *cd_path = malloc(sizeof(char) * len);
+      cd_path[0] = '\0';
+      //put home path at the beginning of the argument
+      strcpy(cd_path, home->value);
+      if (strlen(cmd->argv[1]) > 1) {
+	//if there was something after ~ append it
+	strcpy(cd_path + strlen(cd_path), cmd->argv[1] + 1);
       }
-      else {
-	cmd->argc = 2;
-	p_string_t tmp = malloc(sizeof(char*) * 3);
-	tmp[0] = cmd->argv[0];
-	tmp[1] = NULL;
-	tmp[2] = NULL;
-	free(cmd->argv);
-	cmd->argv = tmp;
+      //delete old string
+      free(cmd->argv[1]);
+      //put new cd path as agument
+      cmd->argv[1] = cd_path;
       }
-      cmd->argv[1] = malloc(sizeof(char) * 
-      			    (strlen(home->value) + 1));
-      strcpy(cmd->argv[1], home->value);
-    }
   }
 }
 
