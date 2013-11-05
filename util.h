@@ -1,6 +1,7 @@
-b#include <string.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 
 /*
  * remove blanks from beginning and end of a string

@@ -21,16 +21,45 @@ const int MAX_COMMAND_LENGTH = 512;
  * with this symbol
  */
 char OPTN_VAR_STARTER = '\0';
-//used to parse commands
-const unsigned char PARSE_VAR = (1 << 0);
-const unsigned char PARSE_STRING = (1 << 1);
-const unsigned char PARSE_NORMAL = (1 << 2);
 
 //list used to parse commands
 typedef struct argv_list {
   struct argv_list* next;
   char *value;
 } argv_t;
+
+//parsing functions and data structures
+
+typedef enum {
+  PARSE_VAR,
+  PARSE_STRING,
+  PARSE_NORMAL
+} parse_policy_t;
+
+typedef struct State{
+  //current parsing policy
+  parse_policy_t policy;
+  //previous parsing policy, used to come back to string policy
+  //after expanding a var in a string
+  parse_policy_t prev_policy;
+  //list to which append new arguments
+  argv_t **argv_list;
+  //environment variables list
+  environment_t env;
+  //temporary parsing buffer for string parsing
+  char *parsing_buffer;
+  //number of arguments parsed so far
+  unsigned int argc;
+  //token currently processed
+  char *current_token;
+  //separator for the token currently processed
+  char current_sep;
+} parse_state_t;
+
+//parsing functions for each policy
+void parseVarState(parse_state_t*);
+void parseNormalState(parse_state_t*);
+void parseStringState(parse_state_t*);
 
 //"private" functions
 var_t* parseVar(char *buffer);
@@ -142,8 +171,11 @@ void parseSpecial(command_t *cmd, environment_t env) {
 void addToken(char *str, argv_t **head) {
   if (strlen(str) == 0) 
     return;
+  //use temporary string to avoid modifying str
+  char *tmp = malloc(sizeof(char) * strlen(str));
+  strcpy(tmp, str);
   //unescape given argument
-  unescape(str);
+  unescape(tmp);
   argv_t *current;
   //insert token in the list
   if (*(head) == NULL) {
@@ -163,7 +195,127 @@ void addToken(char *str, argv_t **head) {
   }
   //copy value string to new malloc string buffer
   current->value = malloc(sizeof(char) * (strlen(str) + 1));
-  strcpy(current->value, str);
+  strcpy(current->value, tmp);
+  free(tmp);
+}
+
+/*
+ * function for parsing of tokens that match the separator '"'
+ * @param {parse_state_t*} current parsing state
+ */
+void parseNormalState(parse_state_t* state) {
+  printf("normal: %s\n", state->current_token);
+  //add token as an argument and change handler
+  addToken(state->current_token, state->argv_list);
+  state->prev_policy = PARSE_NORMAL;
+  switch (state->current_sep) {
+  case '"':
+    state->policy = PARSE_STRING;
+    break;
+  case '$':
+    state->policy = PARSE_VAR;
+    break;
+  case ' ':
+    //stay in the same state
+    break;
+  }
+}
+
+/*
+ * function for parsing a var after the $ separator
+ * @param {parse_state_t*} current parsing state
+ */
+void parseVarState(parse_state_t* state) {
+  printf("var: %s\n", state->current_token);
+  var_t *var = getEnvVar(state->env, state->current_token);
+  if (state->prev_policy == PARSE_STRING) {
+    //save old buffer pointer
+    char* tmp_free_holder = state->parsing_buffer;
+    int grow_length = strlen(var->value);
+    //add extra space for the space
+    if (state->current_sep == ' ')
+      grow_length++;
+    //grow buffer size, old content is copied automatically
+    state->parsing_buffer = strgrow(state->parsing_buffer,
+				    grow_length);
+   //free old string
+   if (tmp_free_holder != NULL) 
+     free(tmp_free_holder);
+   //append var to parsed string
+   strcat(state->parsing_buffer, var->value);
+   //preserve space sparator
+   if (state->current_sep == ' ')
+     strcat(state->parsing_buffer, " ");
+   }
+  else {
+    //add var as arg
+    if (var != NULL) addToken(var->value, state->argv_list);
+  }
+  switch (state->current_sep) {
+  case '"':
+    if (state->prev_policy == PARSE_STRING) {
+      state->policy = PARSE_NORMAL;
+      //flush parsing buffer
+      addToken(state->parsing_buffer, state->argv_list);
+      free(state->parsing_buffer);
+      state->parsing_buffer = NULL;
+    }
+    else {
+      state->policy = PARSE_STRING;
+    }
+    state->prev_policy = PARSE_VAR;
+    break;
+  case ' ':
+    //switch back to previous state
+    state->prev_policy = PARSE_VAR;
+    if (state->prev_policy = PARSE_STRING) {
+      state->policy = PARSE_STRING;
+    }
+    else {
+      state->policy = PARSE_NORMAL;
+    }
+  }
+}
+
+/*
+ * function for parsing of tokens that follow a " char
+ * @param {parse_state_t*} current parsing state
+ */
+void parseStringState(parse_state_t* state) {
+  printf("string: '%s'\n", state->current_token);
+  //append token to parsing_buffer
+  //save old buffer pointer
+  char* tmp_free_holder = state->parsing_buffer;
+  int grow_length = strlen(state->current_token);
+  //add extra space for the space
+  if (state->current_sep == ' ')
+    grow_length++;
+  //grow buffer size, old content is copied automatically
+  state->parsing_buffer = strgrow(state->parsing_buffer,
+				  grow_length);
+  //free old string
+  if (tmp_free_holder != NULL) 
+    free(tmp_free_holder);
+  //append var to parsed string
+  strcat(state->parsing_buffer, state->current_token);
+  if (state->current_sep == ' ')
+    strcat(state->parsing_buffer, " ");
+  switch (state->current_sep) {
+  case '"':
+    //end of string, flush buffer
+    state->prev_policy = PARSE_STRING;
+    state->policy = PARSE_NORMAL;
+    addToken(state->parsing_buffer, state->argv_list);
+    //free temporary buffer
+    free(state->parsing_buffer);
+    state->parsing_buffer = NULL;
+    break;
+  case '$':
+    //switch to parsing variable inside string
+    state->prev_policy = PARSE_STRING;
+    state->policy = PARSE_VAR;
+    break;
+  }
 }
 
 /*
@@ -173,124 +325,52 @@ void addToken(char *str, argv_t **head) {
  * @returns {int} arguments count
  */
 int command2List(argv_t **head, char *buffer, environment_t env) {
-  //use a copy of buffer because strtok modifies its input
-  //char tmp[MAX_COMMAND_LENGTH];
-  //strcpy(tmp, buffer);
-  unsigned char state = PARSE_NORMAL;
-  //hold string currently being parsed in more than one step
-  char *tmp_parsed_string = NULL;
-  //hold buffers waiting to be free'd
-  char *tmp_free_holder = NULL;
-  //hold matched separator
-  char sep;
+  //init parsing state
+  parse_state_t state;
+  state.policy = PARSE_NORMAL;
+  state.prev_policy = PARSE_NORMAL;
+  state.argv_list = head;
+  state.env = env;
+  state.parsing_buffer = NULL;
+  state.argc = 0;
+  state.current_token = NULL;
+  state.current_sep = '\0';
+  //begin parsing
   //token string <malloc> by findFirstUnescapedChar
-  char *tok = nextUnescapedTok(buffer, " \"$", &sep);
-  while(tok != NULL) {
-    if (sep == '"') {
-      //if was parsing normally
-      if (state & PARSE_NORMAL) {
-	//switch to string parsing mode
-	state = PARSE_STRING;
-	//append string normally before string operator
-	addToken(tok, head);
-      }
-      else if (state & PARSE_STRING) {
-	state = PARSE_NORMAL;
-	int alloc_length = strlen(tok);
-	//alloc new tmp_parsed_string (here it should be NULL)
-	tmp_parsed_string = strgrow(tmp_parsed_string, alloc_length);
-	//copy the string into the tmpbuffer withoutthe delimiter " 
-	strcat(tmp_parsed_string, tok);
-	//add parsed string as argument
-	addToken(tmp_parsed_string, head);
-	//free tmp_parsed string since it is not used by the list
-	free(tmp_parsed_string);
-	//set tmp_parsed_string to NULL for safety
-	tmp_parsed_string = NULL;
-      }
+  //note that token refers to everything BEFORE the separator
+  state.current_token = nextUnescapedTok(buffer, " \"$", 
+					 &state.current_sep);
+  while(state.current_token != NULL) {
+    //handle parsing of current token
+    switch (state.policy) {
+    case PARSE_NORMAL:
+      parseNormalState(&state);
+      break;
+    case PARSE_STRING:
+      parseStringState(&state);
+      break;
+    case PARSE_VAR:
+      parseVarState(&state);
+      break;
     }
-    else if (sep == '$') {
-      state |= PARSE_VAR;
-      if (state & PARSE_STRING) {
-	//was parsing a string, append rest of token to
-	//tmp_parsed_string
-	tmp_free_holder = tmp_parsed_string;
-	tmp_parsed_string = strgrow(tmp_parsed_string, strlen(tok));
-	//free old string
-	if (tmp_free_holder != NULL) 
-	  free(tmp_free_holder);
-	//concat old string with new token
-	strcat(tmp_parsed_string, tok);
-      }
-      else if (state & PARSE_NORMAL) {
-	//was parsing normally, append new arg
-	addToken(tok, head);
-      }
-    }
-    else {
-      //perform parsing tasks
-      if (state & PARSE_VAR) {
-	//end of variable is encountered
-	//reset old state
-	state &= !PARSE_VAR;
-	var_t *var = getEnvVar(env, tok);
-	if (state & PARSE_NORMAL) {
-	  //add var as arg
-	  if (var != NULL) addToken(var->value, head);
-	}
-	else if (state & PARSE_STRING) {
-	  tmp_free_holder = tmp_parsed_string;
-	  tmp_parsed_string = strgrow(tmp_parsed_string, 
-				      strlen(var->value));
-	//free old string
-	if (tmp_free_holder != NULL) 
-	  free(tmp_free_holder);
-	//append var to parsed string
-	strcat(tmp_parsed_string, var->value);
-	}
-      }
-      else if (state & PARSE_NORMAL) {
-	addToken(tok, head);
-      }
-      else if (state & PARSE_STRING) {
-	//a string is being parsed
-	//expand temp parsed string buffer, expand by 1 more to 
-	//make room for separator char to be put in
-	int extra = 0;
-	if (sep != '\0')
-	  extra = 1;
-	tmp_free_holder = tmp_parsed_string;
-	tmp_parsed_string = strgrow(tmp_parsed_string, 
-				    strlen(tok) + extra);
-	//free old string
-	if (tmp_free_holder != NULL) 
-	  free(tmp_free_holder);
-	//concat old string with new token
-	strcat(tmp_parsed_string, tok);
-	//add sepatator at the end of token because separator should
-	//not bestripped in this case
-	if (sep != '\0') { 
-	  tmp_parsed_string[strlen(tmp_parsed_string) + 1] = '\0';
-	  tmp_parsed_string[strlen(tmp_parsed_string)] = sep;
-	}
-      }
-    }
-    printf("[d] current str: '%s'\n", tmp_parsed_string);
-    tmp_free_holder = tok;
-    buffer += strlen(tok); //skip token length
-    if (sep != '\0') buffer++; //skip separator char
-    tok = nextUnescapedTok(buffer, " \"$", &sep);
-    printf("[d] new token:'%s', match '%c'\n", tok, sep);
-    //free temporary token string
-    free(tmp_free_holder);
+    buffer += strlen(state.current_token); //skip token length
+    if (state.current_sep != '\0') buffer++; //skip separator char
+    state.current_token = nextUnescapedTok(buffer, " \"$", 
+					   &state.current_sep);
   }
-  //debug print list
+  //check that parsing have finished correctly
+  if (state.policy == PARSE_STRING) {
+    consoleError("Syntax Error");
+    return 0;
+  }
+  //DEBUGG
   argv_t *c = *(head);
   int argc = 0;
   for (; c != NULL; c = c->next) {
     printf("[d] arg %s\n", c->value);
     argc++;
   }
+  //END DEBUG
   return argc;
 }
 

@@ -1,5 +1,5 @@
 #include "util.h"
-#include <stdio.h>
+
 
 /*
  * remove blanks from beginning and end of a string
@@ -81,7 +81,8 @@ void unescape(char* str) {
 
 //dynamic string helpers
 /*
- * grows string to given size
+ * grows string to given size, copy old content into the new
+ * buffer
  * @param {char*} str string to grow
  * @param {int} increment increment of size
  * @returns {char*} new string <malloc>
