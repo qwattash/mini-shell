@@ -2,10 +2,9 @@
 
 /*
  * @todos
- * [experimental] variable expansion
- * [experimental] quotes parsing and escape sequences
- * above features compiles but hang in a loop
  * [feat] pipes
+ * [feat] history
+ * [feat] arrows moving
  */
 
 //name of profile config file
@@ -204,8 +203,8 @@ void addToken(char *str, argv_t **head) {
  * @param {parse_state_t*} current parsing state
  */
 void parseNormalState(parse_state_t* state) {
-  printf("normal: %s\n", state->current_token);
   //add token as an argument and change handler
+  state->argc++;
   addToken(state->current_token, state->argv_list);
   state->prev_policy = PARSE_NORMAL;
   switch (state->current_sep) {
@@ -217,6 +216,7 @@ void parseNormalState(parse_state_t* state) {
     break;
   case ' ':
     //stay in the same state
+    state->policy = PARSE_NORMAL;
     break;
   }
 }
@@ -226,7 +226,6 @@ void parseNormalState(parse_state_t* state) {
  * @param {parse_state_t*} current parsing state
  */
 void parseVarState(parse_state_t* state) {
-  printf("var: %s\n", state->current_token);
   var_t *var = getEnvVar(state->env, state->current_token);
   if (state->prev_policy == PARSE_STRING) {
     //save old buffer pointer
@@ -249,6 +248,7 @@ void parseVarState(parse_state_t* state) {
    }
   else {
     //add var as arg
+    state->argc++;
     if (var != NULL) addToken(var->value, state->argv_list);
   }
   switch (state->current_sep) {
@@ -267,13 +267,13 @@ void parseVarState(parse_state_t* state) {
     break;
   case ' ':
     //switch back to previous state
-    state->prev_policy = PARSE_VAR;
-    if (state->prev_policy = PARSE_STRING) {
+    if (state->prev_policy == PARSE_STRING) {
       state->policy = PARSE_STRING;
     }
     else {
       state->policy = PARSE_NORMAL;
     }
+    state->prev_policy = PARSE_VAR;
   }
 }
 
@@ -282,7 +282,6 @@ void parseVarState(parse_state_t* state) {
  * @param {parse_state_t*} current parsing state
  */
 void parseStringState(parse_state_t* state) {
-  printf("string: '%s'\n", state->current_token);
   //append token to parsing_buffer
   //save old buffer pointer
   char* tmp_free_holder = state->parsing_buffer;
@@ -303,6 +302,7 @@ void parseStringState(parse_state_t* state) {
   switch (state->current_sep) {
   case '"':
     //end of string, flush buffer
+    state->argc++;
     state->prev_policy = PARSE_STRING;
     state->policy = PARSE_NORMAL;
     addToken(state->parsing_buffer, state->argv_list);
@@ -363,15 +363,7 @@ int command2List(argv_t **head, char *buffer, environment_t env) {
     consoleError("Syntax Error");
     return 0;
   }
-  //DEBUGG
-  argv_t *c = *(head);
-  int argc = 0;
-  for (; c != NULL; c = c->next) {
-    printf("[d] arg %s\n", c->value);
-    argc++;
-  }
-  //END DEBUG
-  return argc;
+  return state.argc;
 }
 
 /*
