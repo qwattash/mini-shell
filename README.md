@@ -11,3 +11,7 @@ ii) The shell shows a prompt structured like $HOME> i.e. /home/user>
 iii) when the user types a command the first word is interpreted as the name of the command to be searched in $PATH, the other words are treated as parameters.
 iv) when the program completes the prompt should be shown again
 v) cd commands and PATH or HOME assignments in the shell should work
+
+Additional features
+i) string parsingand escaping
+ii)variable expansion
