@@ -435,7 +435,7 @@ command_t* parseCommand(char *buffer, environment_t env) {
     cmd->envp[index] = malloc(sizeof(char) * 
 			      (strlen(env_var->var.name) + 
 			       strlen(env_var->var.value) + 
-			       1));
+			       2));
     cmd->envp[index][0] = '\0';
     strcat(cmd->envp[index], env_var->var.name);
     strcat(cmd->envp[index], "=");
